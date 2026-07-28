@@ -20,10 +20,9 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_NAME,
 )
 
-from traceloop.sdk.tracing import get_tracer, set_workflow_name, set_agent_name
+from traceloop.sdk.tracing import get_tracer
 from traceloop.sdk.tracing.tracing import (
     TracerWrapper,
-    set_entity_path,
     get_chained_entity_path,
 )
 from traceloop.sdk.utils import camel_to_snake
@@ -136,25 +135,26 @@ def _is_async_method(fn):
 
 
 def _setup_span(entity_name, tlp_span_kind, version):
-    """Sets up the OpenTelemetry span and context"""
-    if tlp_span_kind == TraceloopSpanKindValues.WORKFLOW:
-        set_workflow_name(entity_name)
-    elif tlp_span_kind == TraceloopSpanKindValues.AGENT:
-        set_agent_name(entity_name)
-
+    """Set up the OpenTelemetry span and scope entity context to its lifetime."""
     span_name = f"{entity_name}.{tlp_span_kind.value}"
 
     with get_tracer() as tracer:
         span = tracer.start_span(span_name)
         ctx = trace.set_span_in_context(span)
-        ctx_token = context_api.attach(ctx)
+
+        if tlp_span_kind == TraceloopSpanKindValues.WORKFLOW:
+            ctx = context_api.set_value("workflow_name", entity_name, ctx)
+        elif tlp_span_kind == TraceloopSpanKindValues.AGENT:
+            ctx = context_api.set_value("agent_name", entity_name, ctx)
 
         if tlp_span_kind in [
             TraceloopSpanKindValues.TASK,
             TraceloopSpanKindValues.TOOL,
         ]:
             entity_path = get_chained_entity_path(entity_name)
-            set_entity_path(entity_path)
+            ctx = context_api.set_value("entity_path", entity_path, ctx)
+
+        ctx_token = context_api.attach(ctx)
 
         span.set_attribute(SpanAttributes.TRACELOOP_SPAN_KIND, tlp_span_kind.value)
         span.set_attribute(SpanAttributes.TRACELOOP_ENTITY_NAME, entity_name)
