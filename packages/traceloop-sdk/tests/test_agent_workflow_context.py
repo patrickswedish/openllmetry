@@ -10,6 +10,7 @@ These tests pin the fixed behavior:
 - @agent nested inside @workflow inherits workflow_name from the workflow.
 - The same agent name running under two different workflows stays distinct.
 - A bare @agent (no enclosing @workflow) leaves workflow_name unset.
+- Agent context does not leak into later sibling spans.
 """
 
 from opentelemetry import trace
@@ -126,3 +127,54 @@ def test_bare_agent_does_not_set_workflow_name(exporter):
 
     assert SpanAttributes.TRACELOOP_WORKFLOW_NAME not in child_span.attributes
     assert child_span.attributes[GEN_AI_AGENT_NAME] == "solo"
+
+
+def test_agent_context_does_not_leak_to_later_task(exporter):
+    """A completed bare agent must not tag an unrelated later task."""
+
+    @agent(name="planner")
+    def planner_agent():
+        pass
+
+    @task(name="after")
+    def after_task():
+        _make_child_span("after.child")
+
+    planner_agent()
+    after_task()
+
+    spans = exporter.get_finished_spans()
+    by_name = {span.name: span for span in spans}
+
+    assert GEN_AI_AGENT_NAME not in by_name["after.task"].attributes
+    assert GEN_AI_AGENT_NAME not in by_name["after.child"].attributes
+
+
+def test_nested_agent_context_does_not_leak_to_workflow_sibling(exporter):
+    """A task after a nested agent keeps workflow context without agent context."""
+
+    @agent(name="planner")
+    def planner_agent():
+        pass
+
+    @task(name="sibling")
+    def sibling_task():
+        _make_child_span("sibling.child")
+
+    @workflow(name="rag")
+    def rag_workflow():
+        planner_agent()
+        sibling_task()
+
+    rag_workflow()
+
+    spans = exporter.get_finished_spans()
+    by_name = {span.name: span for span in spans}
+
+    sibling_span = by_name["sibling.task"]
+    child_span = by_name["sibling.child"]
+
+    assert sibling_span.attributes[SpanAttributes.TRACELOOP_WORKFLOW_NAME] == "rag"
+    assert GEN_AI_AGENT_NAME not in sibling_span.attributes
+    assert child_span.attributes[SpanAttributes.TRACELOOP_WORKFLOW_NAME] == "rag"
+    assert GEN_AI_AGENT_NAME not in child_span.attributes
