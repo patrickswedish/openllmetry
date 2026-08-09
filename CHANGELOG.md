@@ -1,3 +1,9 @@
+## v0.62.2 (2026-08-09)
+
+### Fix
+
+- **sdk,openai-agents**: stop entity names leaking onto sibling and parent spans (#4405)
+
 ## v0.62.1 (2026-06-28)
 
 ### Fix
